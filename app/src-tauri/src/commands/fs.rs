@@ -109,9 +109,61 @@ pub async fn cmd_delete_folder(
 
 
 #[derive(Clone, serde::Serialize)]
-struct ProgressPayload {
-    id: String,
-    percent: u8,
+pub struct ProgressPayload {
+    pub id: String,
+    pub percent: u8,
+    pub uploaded_bytes: u64,
+    pub total_bytes: u64,
+    pub speed_bytes_per_sec: f64,
+}
+
+use tokio::io::{AsyncRead, ReadBuf};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::{Instant, Duration};
+
+struct ProgressReader<R> {
+    inner: R,
+    total_size: u64,
+    uploaded: u64,
+    start_time: Instant,
+    last_emit: Instant,
+    app_handle: tauri::AppHandle,
+    transfer_id: String,
+}
+
+impl<R: AsyncRead + Unpin> AsyncRead for ProgressReader<R> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let poll_result = Pin::new(&mut self.inner).poll_read(cx, buf);
+        
+        if let Poll::Ready(Ok(())) = poll_result {
+            let bytes_read = buf.filled().len() as u64;
+            if bytes_read > 0 {
+                self.uploaded += bytes_read;
+                let now = Instant::now();
+                
+                if now.duration_since(self.last_emit) >= Duration::from_millis(250) {
+                    let percent = (self.uploaded as f64 / self.total_size as f64 * 100.0).min(100.0) as u8;
+                    let elapsed = now.duration_since(self.start_time).as_secs_f64();
+                    let speed = if elapsed > 0.0 { (self.uploaded as f64 / elapsed) } else { 0.0 };
+
+                    let _ = self.app_handle.emit("upload-progress", ProgressPayload { 
+                        id: self.transfer_id.clone(), 
+                        percent,
+                        uploaded_bytes: self.uploaded,
+                        total_bytes: self.total_size,
+                        speed_bytes_per_sec: speed,
+                    });
+                    self.last_emit = now;
+                }
+            }
+        }
+        poll_result
+    }
 }
 
 #[tauri::command]
@@ -123,7 +175,8 @@ pub async fn cmd_upload_file(
     state: State<'_, TelegramState>,
     bw_state: State<'_, BandwidthManager>,
 ) -> Result<String, String> {
-    let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    let file_metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    let size = file_metadata.len();
     bw_state.can_transfer(size)?;
 
     let tid = transfer_id.unwrap_or_default();
@@ -136,10 +189,16 @@ pub async fn cmd_upload_file(
     }
     let client = client_opt.unwrap();
     
-    // Emit start progress
-    if !tid.is_empty() {
-        let _ = app_handle.emit("upload-progress", ProgressPayload { id: tid.clone(), percent: 0 });
-    }
+    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let progress_reader = ProgressReader {
+        inner: file,
+        total_size: size,
+        uploaded: 0,
+        start_time: Instant::now(),
+        last_emit: Instant::now(),
+        app_handle: app_handle.clone(),
+        transfer_id: tid.clone(),
+    };
 
     let path_clone = path.clone();
     let client_clone = client.clone();
@@ -150,16 +209,19 @@ pub async fn cmd_upload_file(
       .map_err(map_error)?;
         
     let message = InputMessage::new().text("").file(uploaded_file);
-
     let peer = resolve_peer(&client, folder_id, &state.peer_cache).await?;
-    
     client.send_message(&peer, message).await.map_err(map_error)?;
     
     bw_state.add_up(size);
 
-    // Emit completion
     if !tid.is_empty() {
-        let _ = app_handle.emit("upload-progress", ProgressPayload { id: tid, percent: 100 });
+        let _ = app_handle.emit("upload-progress", ProgressPayload { 
+            id: tid, 
+            percent: 100,
+            uploaded_bytes: size,
+            total_bytes: size,
+            speed_bytes_per_sec: 0.0,
+        });
     }
 
     Ok("File uploaded successfully".to_string())

@@ -21,6 +21,9 @@ export interface QueueItem {
     status: 'pending' | 'uploading' | 'success' | 'error' | 'cancelled';
     error?: string;
     progress?: number; // 0-100
+    uploaded_bytes?: number;
+    total_bytes?: number;
+    speed_bytes_per_sec?: number;
 }
 
 export interface BandwidthStats {

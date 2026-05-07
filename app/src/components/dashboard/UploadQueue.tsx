@@ -41,15 +41,32 @@ export function UploadQueue({ items, onClearFinished, onCancelAll }: UploadQueue
                             {item.status === 'cancelled' && <div className="text-xs text-gray-400">Cancelled</div>}
                         </div>
                         {item.status === 'uploading' && (
-                            <div className="w-full bg-telegram-border h-1 mt-1 rounded-full overflow-hidden">
-                                {item.progress !== undefined ? (
-                                    <div
-                                        className="bg-blue-500 h-full rounded-full transition-all duration-300"
-                                        style={{ width: `${item.progress}%` }}
-                                    />
-                                ) : (
-                                    <div className="bg-blue-500 h-full w-full animate-progress-indeterminate" />
-                                )}
+                            <div className="flex flex-col gap-1 w-full mt-1">
+                                <div className="flex justify-between items-center text-[10px] font-mono text-blue-400">
+                                    <span>
+                                        {item.uploaded_bytes 
+                                            ? `${(item.uploaded_bytes / 1024 / 1024).toFixed(2)} MB / ${(item.total_bytes! / 1024 / 1024).toFixed(2)} MB` 
+                                            : 'Uploading...'}
+                                    </span>
+                                    <span>
+                                        {item.speed_bytes_per_sec 
+                                            ? `${(item.speed_bytes_per_sec / 1024 / 1024).toFixed(2)} MB/s` 
+                                            : '0 MB/s'}
+                                    </span>
+                                </div>
+                                <div className="w-full bg-telegram-border h-1.5 rounded-full overflow-hidden">
+                                    {item.progress !== undefined ? (
+                                        <div
+                                            className="bg-blue-500 h-full rounded-full transition-all duration-300"
+                                            style={{ width: `${item.progress}%` }}
+                                        />
+                                    ) : (
+                                        <div className="bg-blue-500 h-full w-full animate-progress-indeterminate" />
+                                    )}
+                                </div>
+                                <div className="text-right text-[9px] text-blue-400/70">
+                                    {item.progress}%
+                                </div>
                             </div>
                         )}
                     </div>
