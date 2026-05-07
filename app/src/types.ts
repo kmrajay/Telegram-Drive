@@ -39,4 +39,7 @@ export interface DownloadItem {
     status: 'pending' | 'downloading' | 'success' | 'error' | 'cancelled';
     error?: string;
     progress?: number; // 0-100
+    downloaded_bytes?: number;
+    total_bytes?: number;
+    speed_bytes_per_sec?: number;
 }

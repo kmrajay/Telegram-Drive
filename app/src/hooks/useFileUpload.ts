@@ -11,6 +11,9 @@ import type { Store } from '@tauri-apps/plugin-store';
 interface ProgressPayload {
     id: string;
     percent: number;
+    uploaded_bytes: number;
+    total_bytes: number;
+    speed_bytes_per_sec: number;
 }
 
 export function useFileUpload(activeFolderId: number | null, store: Store | null) {
@@ -25,7 +28,13 @@ export function useFileUpload(activeFolderId: number | null, store: Store | null
         let unlisten: UnlistenFn | undefined;
         listen<ProgressPayload>('upload-progress', (event) => {
             setUploadQueue(q => q.map(i =>
-                i.id === event.payload.id ? { ...i, progress: event.payload.percent } : i
+                i.id === event.payload.id ? {
+                    ...i,
+                    progress: event.payload.percent,
+                    uploaded_bytes: event.payload.uploaded_bytes,
+                    total_bytes: event.payload.total_bytes,
+                    speed_bytes_per_sec: event.payload.speed_bytes_per_sec,
+                } : i
             ));
         }).then(fn => { unlisten = fn; });
         return () => { unlisten?.(); };

@@ -138,10 +138,12 @@ impl<R: AsyncRead + Unpin> AsyncRead for ProgressReader<R> {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
+        let filled_before = buf.filled().len();
         let poll_result = Pin::new(&mut self.inner).poll_read(cx, buf);
         
         if let Poll::Ready(Ok(())) = poll_result {
-            let bytes_read = buf.filled().len() as u64;
+            let filled_after = buf.filled().len();
+            let bytes_read = (filled_after - filled_before) as u64;
             if bytes_read > 0 {
                 self.uploaded += bytes_read;
                 let now = Instant::now();
@@ -149,7 +151,7 @@ impl<R: AsyncRead + Unpin> AsyncRead for ProgressReader<R> {
                 if now.duration_since(self.last_emit) >= Duration::from_millis(250) {
                     let percent = (self.uploaded as f64 / self.total_size as f64 * 100.0).min(100.0) as u8;
                     let elapsed = now.duration_since(self.start_time).as_secs_f64();
-                    let speed = if elapsed > 0.0 { (self.uploaded as f64 / elapsed) } else { 0.0 };
+                    let speed = if elapsed > 0.0 { self.uploaded as f64 / elapsed } else { 0.0 };
 
                     let _ = self.app_handle.emit("upload-progress", ProgressPayload { 
                         id: self.transfer_id.clone(), 
@@ -189,8 +191,8 @@ pub async fn cmd_upload_file(
     }
     let client = client_opt.unwrap();
     
-    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
-    let progress_reader = ProgressReader {
+    let file = tokio::fs::File::open(&path).await.map_err(|e| e.to_string())?;
+    let mut progress_reader = ProgressReader {
         inner: file,
         total_size: size,
         uploaded: 0,
@@ -200,13 +202,17 @@ pub async fn cmd_upload_file(
         transfer_id: tid.clone(),
     };
 
-    let path_clone = path.clone();
+    let file_name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+
     let client_clone = client.clone();
-    
+
     let uploaded_file = tauri::async_runtime::spawn(async move {
-        client_clone.upload_file(&path_clone).await
+        client_clone.upload_stream(&mut progress_reader, size as usize, file_name).await
     }).await.map_err(|e| format!("Task join error: {}", e))?
-      .map_err(map_error)?;
+      .map_err(|e| format!("Upload error: {}", e))?;
         
     let message = InputMessage::new().text("").file(uploaded_file);
     let peer = resolve_peer(&client, folder_id, &state.peer_cache).await?;
@@ -288,7 +294,13 @@ pub async fn cmd_download_file(
 
     // Emit start
     if !tid.is_empty() {
-        let _ = app_handle.emit("download-progress", ProgressPayload { id: tid.clone(), percent: 0 });
+        let _ = app_handle.emit("download-progress", ProgressPayload {
+            id: tid.clone(),
+            percent: 0,
+            uploaded_bytes: 0,
+            total_bytes: total_size,
+            speed_bytes_per_sec: 0.0,
+        });
     }
 
     // Stream download with per-chunk progress
@@ -296,6 +308,8 @@ pub async fn cmd_download_file(
     let mut file = std::fs::File::create(&save_path).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut last_percent: u8 = 0;
+    let dl_start = Instant::now();
+    let mut dl_last_emit = Instant::now();
 
     while let Some(chunk) = download_iter.next().await.transpose() {
         let bytes = chunk.map_err(|e| format!("Download chunk error: {}", e))?;
@@ -303,11 +317,21 @@ pub async fn cmd_download_file(
         downloaded += bytes.len() as u64;
         
         if !tid.is_empty() && total_size > 0 {
+            let now = Instant::now();
             let percent = ((downloaded as f64 / total_size as f64) * 100.0).min(100.0) as u8;
-            // Only emit when percent actually changes to avoid event spam
-            if percent != last_percent {
+            // Emit when percent changes or every 250ms (whichever comes first)
+            if percent != last_percent || now.duration_since(dl_last_emit) >= Duration::from_millis(250) {
                 last_percent = percent;
-                let _ = app_handle.emit("download-progress", ProgressPayload { id: tid.clone(), percent });
+                let elapsed = now.duration_since(dl_start).as_secs_f64();
+                let speed = if elapsed > 0.0 { downloaded as f64 / elapsed } else { 0.0 };
+                let _ = app_handle.emit("download-progress", ProgressPayload {
+                    id: tid.clone(),
+                    percent,
+                    uploaded_bytes: downloaded,
+                    total_bytes: total_size,
+                    speed_bytes_per_sec: speed,
+                });
+                dl_last_emit = now;
             }
         }
     }
@@ -316,7 +340,13 @@ pub async fn cmd_download_file(
 
     // Emit completion
     if !tid.is_empty() {
-        let _ = app_handle.emit("download-progress", ProgressPayload { id: tid, percent: 100 });
+        let _ = app_handle.emit("download-progress", ProgressPayload {
+            id: tid,
+            percent: 100,
+            uploaded_bytes: total_size,
+            total_bytes: total_size,
+            speed_bytes_per_sec: 0.0,
+        });
     }
 
     Ok("Download successful".to_string())
