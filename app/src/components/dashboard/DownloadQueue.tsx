@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { DownloadItem } from "../../types";
-import { Download, Check, X, AlertCircle, Minus, Loader2 } from "lucide-react";
+import { Download, Check, X, AlertCircle, Minus, Loader2, RotateCw } from "lucide-react";
 
 interface DownloadQueueProps {
     items: DownloadItem[];
     onClearFinished: () => void;
     onCancelAll: () => void;
     onCancelItem: (id: string) => void;
+    onRetryItem: (id: string) => void;
 }
 
-export function DownloadQueue({ items, onClearFinished, onCancelAll, onCancelItem }: DownloadQueueProps) {
+export function DownloadQueue({ items, onClearFinished, onCancelAll, onCancelItem, onRetryItem }: DownloadQueueProps) {
     const [minimized, setMinimized] = useState(false);
 
     if (items.length === 0) return null;
@@ -81,6 +82,18 @@ export function DownloadQueue({ items, onClearFinished, onCancelAll, onCancelIte
                                     <div className="text-xs text-telegram-secondary font-mono">{item.progress}%</div>
                                 )}
                                 {item.status === 'cancelled' && <div className="text-xs text-gray-400">Cancelled</div>}
+                                {item.status === 'error' && (
+                                    <div className="flex items-center gap-1">
+                                        <div className="text-xs text-red-400">Error</div>
+                                        <button
+                                            onClick={() => onRetryItem(item.id)}
+                                            className="p-0.5 hover:bg-blue-500/20 rounded transition-colors group"
+                                            title="Retry download"
+                                        >
+                                            <RotateCw className="w-3 h-3 text-red-400 group-hover:text-blue-400" />
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             {item.status === 'downloading' && (
                                 <div className="flex flex-col gap-1 w-full mt-1">
@@ -113,8 +126,15 @@ export function DownloadQueue({ items, onClearFinished, onCancelAll, onCancelIte
                             )}
                             {item.status === 'error' && item.error && (
                                 <div className="flex items-center gap-1 text-xs text-red-400 mt-1">
-                                    <AlertCircle className="w-3 h-3" />
-                                    <span className="truncate">{item.error}</span>
+                                    <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                                    <span className="truncate flex-1">{item.error}</span>
+                                    <button
+                                        onClick={() => onRetryItem(item.id)}
+                                        className="flex-shrink-0 px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded transition-colors"
+                                        title="Retry download"
+                                    >
+                                        Retry
+                                    </button>
                                 </div>
                             )}
                         </div>

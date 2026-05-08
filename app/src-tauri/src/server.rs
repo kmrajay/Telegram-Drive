@@ -1,4 +1,4 @@
-use actix_web::{get, web, App, HttpServer, HttpResponse, Responder};
+use actix_web::{get, web, App, HttpServer, HttpResponse, Responder, HttpRequest};
 use actix_cors::Cors;
 use crate::commands::TelegramState;
 use crate::commands::utils::resolve_peer;
@@ -16,8 +16,31 @@ struct StreamQuery {
     token: Option<String>,
 }
 
+/// Parse a Range header like "bytes=0-1023" into (start, end) where end is inclusive.
+/// Returns None if the header is missing or unparseable.
+fn parse_range_header(range_header: &str, total_size: u64) -> Option<(u64, u64)> {
+    let range = range_header.strip_prefix("bytes=")?;
+    let parts: Vec<&str> = range.split('-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let start: u64 = parts[0].parse().ok()?;
+    let end: u64 = if parts[1].is_empty() {
+        // "bytes=0-" means from start to end
+        total_size - 1
+    } else {
+        let parsed: u64 = parts[1].parse().ok()?;
+        parsed.min(total_size - 1)
+    };
+    if start > end {
+        return None;
+    }
+    Some((start, end))
+}
+
 #[get("/stream/{folder_id}/{message_id}")]
 async fn stream_media(
+    req: HttpRequest,
     path: web::Path<(String, i32)>,
     query: web::Query<StreamQuery>,
     data: web::Data<Arc<TelegramState>>,
@@ -33,23 +56,19 @@ async fn stream_media(
         _ => {
             log::error!("Stream request failed: Invalid or missing stream token for msg {}", message_id);
             return HttpResponse::Forbidden().body("Invalid or missing stream token")
-        },
+        }
     }
     
     // Parse folder ID
     let folder_id = if folder_id_str == "me" || folder_id_str == "home" || folder_id_str == "null" {
-        log::debug!("Stream request: Using root folder for msg {}", message_id);
         None
     } else {
         match folder_id_str.parse::<i64>() {
-            Ok(id) => {
-                log::debug!("Stream request: Parsed folder ID {} for msg {}", id, message_id);
-                Some(id)
-            },
+            Ok(id) => Some(id),
             Err(_) => {
                 log::error!("Stream request failed: Invalid folder ID format '{}' for msg {}", folder_id_str, message_id);
                 return HttpResponse::BadRequest().body("Invalid folder ID")
-            },
+            }
         }
     };
 
@@ -58,16 +77,12 @@ async fn stream_media(
     };
 
     if let Some(client) = client_opt {
-        log::debug!("Stream request: Client acquired, resolving peer for msg {}...", message_id);
         match resolve_peer(&client, folder_id, &data.peer_cache).await {
             Ok(peer) => {
-                log::debug!("Stream request: Peer resolved, fetching message {}...", message_id);
-                // Try to fetch message efficiently
-                 match client.get_messages_by_id(peer, &[message_id]).await {
+                match client.get_messages_by_id(peer, &[message_id]).await {
                     Ok(messages) => {
                         if let Some(Some(msg)) = messages.first() {
                             if let Some(media) = msg.media() {
-                                log::debug!("Stream request: Message and media found for msg {}", message_id);
                                 let size = match &media {
                                     Media::Document(d) => d.size(),
                                     Media::Photo(_) => 0, 
@@ -75,12 +90,93 @@ async fn stream_media(
                                 };
                                 
                                 let mime = mime_type_from_media(&media);
-                                log::debug!("Stream request: Starting download for msg {} (mime: {}, size: {})", message_id, mime, size);
-                                
-                                // Create chunk-streaming response
+                                log::info!("Stream request: msg {} (mime: {}, size: {})", message_id, mime, size);
+
+                                // Check for Range header
+                                let range_header = req.headers().get("Range").and_then(|v| v.to_str().ok());
+
+                                if let Some(range_str) = range_header {
+                                    // Range request — partial content
+                                    if let Some((start, end)) = parse_range_header(range_str, size as u64) {
+                                        let content_length = end - start + 1;
+                                        log::info!("Stream request: Range {}-{} / {} ({} bytes)", start, end, size, content_length);
+
+                                        let mut download_iter = client.iter_download(&media);
+
+                                        // If requesting from the beginning, stream normally
+                                        // For mid-file seeks, we need to skip bytes
+                                        let skip_bytes = start;
+                                        let stream = async_stream::stream! {
+                                            let mut total_yielded: u64 = 0;
+                                            let mut total_read: u64 = 0;
+                                            let mut done = false;
+
+                                            while let Some(chunk) = download_iter.next().await.transpose() {
+                                                if done { break; }
+                                                match chunk {
+                                                    Ok(bytes) => {
+                                                        let chunk_len = bytes.len() as u64;
+                                                        
+                                                        // Skip chunks before our range start
+                                                        if total_read + chunk_len <= skip_bytes {
+                                                            total_read += chunk_len;
+                                                            continue;
+                                                        }
+
+                                                        // We're in or past the start of our range
+                                                        let mut offset_in_chunk: usize = 0;
+                                                        if total_read < skip_bytes {
+                                                            offset_in_chunk = (skip_bytes - total_read) as usize;
+                                                        }
+
+                                                        let remaining = content_length - total_yielded;
+                                                        let available = (chunk_len - offset_in_chunk as u64).min(remaining);
+                                                        
+                                                        if available == 0 {
+                                                            done = true;
+                                                            break;
+                                                        }
+
+                                                        let slice_end = offset_in_chunk + available as usize;
+                                                        yield Ok::<_, actix_web::Error>(web::Bytes::from(bytes[offset_in_chunk..slice_end].to_vec()));
+                                                        
+                                                        total_yielded += available;
+                                                        total_read += chunk_len;
+
+                                                        if total_yielded >= content_length {
+                                                            done = true;
+                                                        }
+                                                    },
+                                                    Err(e) => {
+                                                        log::error!("Stream error on msg {}: {}", message_id, e);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            log::debug!("Stream request: Range {}-{} completed for msg {}", start, end, message_id);
+                                        };
+
+                                        return HttpResponse::PartialContent()
+                                            .insert_header(("Content-Type", mime.clone()))
+                                            .insert_header(("Content-Length", content_length.to_string()))
+                                            .insert_header(("Content-Range", format!("bytes {}-{}/{}", start, end, size)))
+                                            .insert_header(("Accept-Ranges", "bytes"))
+                                            .insert_header(("Cache-Control", "private, max-age=120"))
+                                            .streaming(stream);
+                                    } else {
+                                        // Unparseable range — return 416 Requested Range Not Satisfiable
+                                        log::warn!("Stream request: Unparseable range header '{}' for msg {}", range_str, message_id);
+                                        return HttpResponse::RangeNotSatisfiable()
+                                            .insert_header(("Content-Range", format!("bytes */{}", size)))
+                                            .finish();
+                                    }
+                                }
+
+                                // No Range header — full file stream
+                                log::info!("Stream request: Full file stream for msg {} ({} bytes)", message_id, size);
                                 let mut download_iter = client.iter_download(&media);
                                 let stream = async_stream::stream! {
-                                    let mut chunk_count = 0;
+                                    let mut chunk_count = 0u32;
                                     while let Some(chunk) = download_iter.next().await.transpose() {
                                         match chunk {
                                             Ok(bytes) => {
@@ -96,7 +192,7 @@ async fn stream_media(
                                             }
                                         }
                                     }
-                                    log::debug!("Stream request: Stream completed for msg {} (total chunks: {})", message_id, chunk_count);
+                                    log::debug!("Stream request: Completed for msg {} (total chunks: {})", message_id, chunk_count);
                                 };
                                 
                                 return HttpResponse::Ok()

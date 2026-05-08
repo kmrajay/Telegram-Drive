@@ -1,5 +1,5 @@
 use tauri::{State, Emitter};
-use grammers_client::types::{Media, Peer};
+use grammers_client::types::{Media, Peer, attributes::Attribute};
 use grammers_client::InputMessage;
 use grammers_tl_types as tl;
 use crate::TelegramState;
@@ -219,6 +219,44 @@ impl<R: AsyncRead + Unpin> AsyncRead for ProgressReader<R> {
 const TG_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 /// Safety buffer — target 1.8 GB to leave room for key-frame drift.
 const SPLIT_TARGET: u64 = 1_932_735_283; // ~1.8 GB
+
+/// Video metadata for proper Telegram media attributes
+#[derive(Default)]
+struct VideoMeta {
+    duration_secs: f64,
+    width: i32,
+    height: i32,
+}
+
+/// Get video metadata (duration, width, height) using ffprobe.
+fn get_video_meta(path: &Path) -> VideoMeta {
+    let output = match Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height,duration",
+            "-of", "csv=p=0",
+            &path.to_string_lossy(),
+        ])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return VideoMeta::default(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // Format: "1920,1080,3600.123" or "1920,1080,N/A"
+    let parts: Vec<&str> = stdout.split(',').collect();
+    if parts.len() >= 3 {
+        VideoMeta {
+            width: parts[0].trim().parse().unwrap_or(0),
+            height: parts[1].trim().parse().unwrap_or(0),
+            duration_secs: parts[2].trim().parse().unwrap_or(0.0),
+        }
+    } else {
+        VideoMeta::default()
+    }
+}
 /// Video file extensions that should be split into playable segments.
 const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "3gp", "ts",
@@ -399,6 +437,38 @@ fn split_video_ffmpeg(input: &Path, app_handle: &tauri::AppHandle, transfer_id: 
         let sz = fs::metadata(part).map_err(|e| e.to_string())?.len();
         if sz > TG_LIMIT {
             log::warn!("Segment {} is {} bytes (over 2GB limit). May fail upload.", part.display(), sz);
+        }
+    }
+
+    // Post-process: move moov atom to the start of each segment for streaming
+    // This is a stream-copy operation (no re-encoding), so it's very fast
+    for (i, part) in parts.iter().enumerate() {
+        let faststart_path = temp_dir.join(format!(".faststart_{}", i));
+        let faststart_result = Command::new("ffmpeg")
+            .args([
+                "-i", &part.to_string_lossy(),
+                "-c", "copy",
+                "-movflags", "+faststart",
+                "-y",
+                &faststart_path.to_string_lossy(),
+            ])
+            .output();
+        
+        match faststart_result {
+            Ok(output) if output.status.success() => {
+                // Replace original with faststart version
+                if let Err(e) = fs::rename(&faststart_path, part) {
+                    log::warn!("Failed to rename faststart file {}: {}", part.display(), e);
+                    let _ = fs::remove_file(&faststart_path);
+                }
+            }
+            Ok(output) => {
+                log::warn!("faststart failed for {}: {}", part.display(), String::from_utf8_lossy(&output.stderr));
+                let _ = fs::remove_file(&faststart_path);
+            }
+            Err(e) => {
+                log::warn!("faststart ffmpeg failed for {}: {}", part.display(), e);
+            }
         }
     }
 
@@ -862,9 +932,41 @@ pub async fn cmd_upload_file(
                     "".to_string()
                 };
 
-                let message = InputMessage::new().text(&caption).file(uploaded_file);
+                // Build message based on file type:
+                // - Videos: use .document() + Attribute::Video(supports_streaming) so Telegram processes them for streaming
+                // - Non-videos: use .file() as before (force_file: true, no Telegram processing)
+                let is_vid = is_video(part_path);
                 let peer = resolve_peer(&client, folder_id, &state.peer_cache).await?;
-                client.send_message(&peer, message).await.map_err(map_error)?;
+
+                if is_vid {
+                    let meta = get_video_meta(part_path);
+                    let mut msg = InputMessage::new().text(&caption).document(uploaded_file);
+
+                    // Add video attribute so Telegram knows it's streamable
+                    if meta.duration_secs > 0.0 || meta.width > 0 {
+                        msg = msg.attribute(Attribute::Video {
+                            round_message: false,
+                            supports_streaming: true,
+                            duration: std::time::Duration::from_secs_f64(if meta.duration_secs > 0.0 { meta.duration_secs } else { 1.0 }),
+                            w: if meta.width > 0 { meta.width } else { 1280 },
+                            h: if meta.height > 0 { meta.height } else { 720 },
+                        });
+                    } else {
+                        // No metadata — still mark as streamable video with defaults
+                        msg = msg.attribute(Attribute::Video {
+                            round_message: false,
+                            supports_streaming: true,
+                            duration: std::time::Duration::from_secs(1),
+                            w: 1280,
+                            h: 720,
+                        });
+                    }
+
+                    client.send_message(&peer, msg).await.map_err(map_error)?;
+                } else {
+                    let message = InputMessage::new().text(&caption).file(uploaded_file);
+                    client.send_message(&peer, message).await.map_err(map_error)?;
+                }
 
                 if !tid.is_empty() && total_parts > 1 {
                     let _ = app_handle.emit("upload-part-status", serde_json::json!({

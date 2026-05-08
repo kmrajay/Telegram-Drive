@@ -100,8 +100,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
     } = useFileOperations(activeFolderId, selectedIds, setSelectedIds, displayedFiles);
 
-    const { uploadQueue, setUploadQueue, splitQueue, handleManualUpload, cancelItem: cancelUploadItem, cancelAll: cancelUploads, clearFinished: clearUploads, removeSplitItem, isDragging } = useFileUpload(activeFolderId, store);
-    const { downloadQueue, queueDownload, clearFinished: clearDownloads, cancelItem: cancelDownloadItem, cancelAll: cancelDownloads } = useFileDownload(store);
+    const { uploadQueue, setUploadQueue, splitQueue, handleManualUpload, cancelItem: cancelUploadItem, cancelAll: cancelUploads, clearFinished: clearUploads, removeSplitItem, retryItem: retryUploadItem, isDragging } = useFileUpload(activeFolderId, store);
+    const { downloadQueue, queueDownload, clearFinished: clearDownloads, cancelItem: cancelDownloadItem, cancelAll: cancelDownloads, retryItem: retryDownloadItem } = useFileDownload(store);
 
 
     const handleSelectAll = useCallback(() => {
@@ -469,6 +469,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                         onClearFinished={clearUploads}
                         onCancelAll={cancelUploads}
                         onCancelItem={cancelUploadItem}
+                        onRetryItem={retryUploadItem}
                     />
                 </div>
                 <div className="pointer-events-auto">
@@ -477,6 +478,7 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
                         onClearFinished={clearDownloads}
                         onCancelAll={cancelDownloads}
                         onCancelItem={cancelDownloadItem}
+                        onRetryItem={retryDownloadItem}
                     />
                 </div>
                 <div className="pointer-events-auto">

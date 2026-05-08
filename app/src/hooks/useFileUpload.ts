@@ -277,6 +277,29 @@ export function useFileUpload(activeFolderId: number | null, store: Store | null
         setUploadQueue(q => q.filter(i => i.status !== 'success' && i.status !== 'error' && i.status !== 'cancelled'));
     };
 
+    const retryItem = (id: string) => {
+        setUploadQueue(q => q.map(i => {
+            if (i.id !== id) return i;
+            return {
+                ...i,
+                status: 'pending' as const,
+                progress: undefined,
+                uploaded_bytes: undefined,
+                total_bytes: undefined,
+                speed_bytes_per_sec: undefined,
+                error: undefined,
+                partIndex: undefined,
+                totalParts: undefined,
+                partProgress: undefined,
+                partUploadedBytes: undefined,
+                partTotalBytes: undefined,
+                partSpeedBytesPerSec: undefined,
+            };
+        }));
+        // Also clear any stale split queue items for this transfer
+        setSplitQueue(q => q.filter(i => i.id !== id));
+    };
+
     const removeSplitItem = (id: string) => {
         setSplitQueue(q => q.filter(i => i.id !== id));
     };
@@ -292,6 +315,7 @@ export function useFileUpload(activeFolderId: number | null, store: Store | null
         cancelAll,
         clearFinished,
         removeSplitItem,
+        retryItem,
         isDragging
     };
 }

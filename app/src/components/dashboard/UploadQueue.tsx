@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { QueueItem } from "../../types";
-import { Upload, Minus, X, Loader2, Check, AlertCircle, Scissors } from "lucide-react";
+import { Upload, Minus, X, Loader2, Check, AlertCircle, Scissors, RotateCw } from "lucide-react";
 
 interface UploadQueueProps {
     items: QueueItem[];
     onClearFinished: () => void;
     onCancelAll: () => void;
     onCancelItem: (id: string) => void;
+    onRetryItem: (id: string) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -21,7 +22,7 @@ function formatSpeed(bytesPerSec: number): string {
     return `${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`;
 }
 
-export function UploadQueue({ items, onClearFinished, onCancelAll, onCancelItem }: UploadQueueProps) {
+export function UploadQueue({ items, onClearFinished, onCancelAll, onCancelItem, onRetryItem }: UploadQueueProps) {
     const [minimized, setMinimized] = useState(false);
 
     if (items.length === 0) return null;
@@ -91,7 +92,18 @@ export function UploadQueue({ items, onClearFinished, onCancelAll, onCancelItem 
                                     {item.status === 'uploading' && !isSplitFile && item.progress !== undefined && (
                                         <div className="text-xs text-blue-400 font-mono">{item.progress}%</div>
                                     )}
-                                    {item.status === 'error' && <div className="text-xs text-red-400">Error</div>}
+                                    {item.status === 'error' && (
+                                        <div className="flex items-center gap-1">
+                                            <div className="text-xs text-red-400">Error</div>
+                                            <button
+                                                onClick={() => onRetryItem(item.id)}
+                                                className="p-0.5 hover:bg-blue-500/20 rounded transition-colors group"
+                                                title="Retry upload"
+                                            >
+                                                <RotateCw className="w-3 h-3 text-red-400 group-hover:text-blue-400" />
+                                            </button>
+                                        </div>
+                                    )}
                                     {item.status === 'cancelled' && <div className="text-xs text-gray-400">Cancelled</div>}
                                 </div>
 
@@ -177,10 +189,17 @@ export function UploadQueue({ items, onClearFinished, onCancelAll, onCancelItem 
 
                                 {item.status === 'error' && item.error && (
                                     <div className="flex items-center gap-1 text-xs text-red-400 mt-1">
-                                        <AlertCircle className="w-3 h-3" />
-                                        <span className="truncate">{item.error}</span>
+                                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                                        <span className="truncate flex-1">{item.error}</span>
+                                        <button
+                                            onClick={() => onRetryItem(item.id)}
+                                            className="flex-shrink-0 px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded transition-colors"
+                                            title="Retry upload"
+                                        >
+                                            Retry
+                                        </button>
                                     </div>
-                                )}
+                                )}}
                             </div>
                         );
                     })}

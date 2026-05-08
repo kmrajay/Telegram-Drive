@@ -7,7 +7,7 @@ pub struct StreamConfig {
 }
 
 /// Returned to the frontend so it can construct stream URLs dynamically
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct StreamInfo {
     pub token: String,
     pub base_url: String,
@@ -22,4 +22,11 @@ pub fn cmd_get_stream_info(config: State<'_, StreamConfig>) -> StreamInfo {
         token: config.token.clone(),
         base_url: format!("http://localhost:{}", config.port),
     }
+}
+
+/// Convenience command that returns just the token.
+/// Used by the MediaPlayer component.
+#[tauri::command]
+pub fn cmd_get_stream_token(config: State<'_, StreamConfig>) -> String {
+    config.token.clone()
 }

@@ -110,6 +110,7 @@ pub fn run() {
             commands::cmd_clean_cache,
             commands::cmd_get_thumbnail,
             commands::cmd_get_stream_info,
+            commands::cmd_get_stream_token,
             commands::cmd_cancel_transfer,
         ])
         .build(tauri::generate_context!())

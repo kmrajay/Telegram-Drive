@@ -180,12 +180,31 @@ export function useFileDownload(store: Store | null) {
         toast.info('All downloads cancelled');
     };
 
+    const retryItem = (id: string) => {
+        const item = downloadQueue.find(i => i.id === id);
+        if (!item) return;
+        // Reset to pending and re-trigger the download
+        setDownloadQueue(q => q.map(i => {
+            if (i.id !== id) return i;
+            return {
+                ...i,
+                status: 'pending' as const,
+                progress: undefined,
+                downloaded_bytes: undefined,
+                total_bytes: undefined,
+                speed_bytes_per_sec: undefined,
+                error: undefined,
+            };
+        }));
+    };
+
     return {
         downloadQueue,
         queueDownload,
         queueBulkDownload,
         clearFinished,
         cancelItem,
-        cancelAll
+        cancelAll,
+        retryItem
     };
 }
