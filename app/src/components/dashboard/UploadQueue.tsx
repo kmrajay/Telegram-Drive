@@ -199,7 +199,7 @@ export function UploadQueue({ items, onClearFinished, onCancelAll, onCancelItem,
                                             Retry
                                         </button>
                                     </div>
-                                )}}
+                                )}
                             </div>
                         );
                     })}

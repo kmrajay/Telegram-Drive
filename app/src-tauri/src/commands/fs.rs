@@ -315,7 +315,8 @@ fn split_video_ffmpeg(input: &Path, app_handle: &tauri::AppHandle, transfer_id: 
         message: format!("Splitting into {} parts...", num_segments),
     });
 
-    let output_pattern = temp_dir.join("part_%03d").to_string_lossy().to_string();
+    let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+    let output_pattern = temp_dir.join(format!("part_%03d.{}", ext)).to_string_lossy().to_string();
     let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
     let output_pattern = format!("{}.{}", output_pattern, ext);
 
@@ -844,10 +845,15 @@ pub async fn cmd_upload_file(
         let part_size = fs::metadata(part_path).map_err(|e| e.to_string())?.len();
         let part_name = if total_parts > 1 {
             let base_name = Path::new(&path)
-                .file_name()
+                .file_stem()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "file".to_string());
-            format!("{}.part{}/{}", base_name, idx + 1, total_parts)
+            let ext = Path::new(&path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{}", e))
+                .unwrap_or_default();
+            format!("{}.part{}of{}{}", base_name, idx + 1, total_parts, ext)
         } else {
             Path::new(&path)
                 .file_name()
