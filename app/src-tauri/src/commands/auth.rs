@@ -106,9 +106,13 @@ pub async fn cmd_connect(
     app_handle: tauri::AppHandle,
     state: State<'_, TelegramState>,
     api_id: i32,
+    api_hash: Option<String>,
 ) -> Result<bool, String> {
-    // Store API ID for auto-reconnect
+    // Store API ID and Hash for auto-reconnect
     *state.api_id.lock().await = Some(api_id);
+    if let Some(hash) = api_hash {
+        *state.api_hash.lock().await = Some(hash);
+    }
     ensure_client_initialized(&app_handle, &state, api_id).await?;
     Ok(true)
 }
@@ -185,6 +189,7 @@ pub async fn cmd_logout(
     *state.login_token.lock().await = None;
     *state.password_token.lock().await = None;
     *state.api_id.lock().await = None;
+    *state.api_hash.lock().await = None;
     crate::commands::utils::clear_peer_cache(&state.peer_cache).await;
 
     // 4. Remove Session File
@@ -211,8 +216,9 @@ pub async fn cmd_auth_request_code(
         return Err("API Hash cannot be empty.".to_string());
     }
 
-    // Store API ID
+    // Store API ID and Hash
     *state.api_id.lock().await = Some(api_id);
+    *state.api_hash.lock().await = Some(api_hash.clone());
 
     let client_handle = ensure_client_initialized(&app_handle, &state, api_id).await?;
     

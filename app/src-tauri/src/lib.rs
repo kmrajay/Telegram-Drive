@@ -55,6 +55,7 @@ pub fn run() {
                 login_token: Arc::new(Mutex::new(None)),
                 password_token: Arc::new(Mutex::new(None)),
                 api_id: Arc::new(Mutex::new(None)),
+                api_hash: Arc::new(Mutex::new(None)),
                 runner_shutdown: Arc::new(std::sync::Mutex::new(None)),
                 runner_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
                 peer_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
