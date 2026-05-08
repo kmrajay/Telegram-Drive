@@ -94,8 +94,12 @@ export function useFileDownload(store: Store | null) {
                 toast.success(`Downloaded: ${item.filename}`);
             }
         } catch (e) {
-            if (!cancelledRef.current.has(item.id)) {
-                setDownloadQueue(q => q.map(i => i.id === item.id ? { ...i, status: 'error', error: String(e) } : i));
+            const errStr = String(e);
+            if (errStr.includes('cancelled')) {
+                setDownloadQueue(q => q.map(i => i.id === item.id ? { ...i, status: 'cancelled' } : i));
+                cancelledRef.current.delete(item.id);
+            } else if (!cancelledRef.current.has(item.id)) {
+                setDownloadQueue(q => q.map(i => i.id === item.id ? { ...i, status: 'error', error: errStr } : i));
                 toast.error(`Download failed: ${item.filename}`);
             } else {
                 cancelledRef.current.delete(item.id);
@@ -142,14 +146,37 @@ export function useFileDownload(store: Store | null) {
         setDownloadQueue(q => q.filter(i => i.status !== 'success'));
     };
 
-    const cancelAll = () => {
-        setDownloadQueue(q => {
-            const downloading = q.find(i => i.status === 'downloading');
-            if (downloading) cancelledRef.current.add(downloading.id);
-            return q
-                .filter(i => i.status !== 'pending')
-                .map(i => i.status === 'downloading' ? { ...i, status: 'cancelled' as const } : i);
-        });
+    const cancelItem = async (id: string) => {
+        const item = downloadQueue.find(i => i.id === id);
+        if (item?.status === 'downloading') {
+            cancelledRef.current.add(id);
+            try {
+                await invoke('cmd_cancel_transfer', { transferId: id });
+            } catch (e) {
+                console.error('Cancel transfer error:', e);
+            }
+        }
+        setDownloadQueue(q => q.map(i =>
+            i.id === id
+                ? { ...i, status: (i.status === 'downloading' || i.status === 'pending' ? 'cancelled' : i.status) as DownloadItem['status'] }
+                : i
+        ));
+    };
+
+    const cancelAll = async () => {
+        const downloading = downloadQueue.find(i => i.status === 'downloading');
+        if (downloading) {
+            cancelledRef.current.add(downloading.id);
+            try {
+                await invoke('cmd_cancel_transfer', { transferId: downloading.id });
+            } catch (e) {
+                console.error('Cancel transfer error:', e);
+            }
+        }
+        setDownloadQueue(q => q
+            .filter(i => i.status !== 'pending')
+            .map(i => i.status === 'downloading' ? { ...i, status: 'cancelled' as const } : i)
+        );
         toast.info('All downloads cancelled');
     };
 
@@ -158,6 +185,7 @@ export function useFileDownload(store: Store | null) {
         queueDownload,
         queueBulkDownload,
         clearFinished,
+        cancelItem,
         cancelAll
     };
 }

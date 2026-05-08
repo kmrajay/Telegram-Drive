@@ -15,6 +15,16 @@ Telegram Drive leverages the Telegram API to allow you to upload, organize, and 
 ###  Key Features
 
 *   **Unlimited Cloud Storage**: Utilizing Telegram's generous cloud infrastructure.
+*   **Large File Support (>2GB)**: Automatically splits files exceeding Telegram's 2GB limit into uploadable segments.
+    *   **Video Splitting**: Uses FFmpeg to split videos into playable, key-frame-aligned segments (~1.8GB each) — each part is independently playable.
+    *   **Non-Video Splitting**: Zips and binary-partitions non-video files into ~1.8GB chunks.
+*   **Live Split Progress**: Real-time progress bar showing which part is being split, with part numbers (e.g., "Splitting part 2/5").
+*   **Dual Progress Bar for Split Uploads**: Two progress bars for large file uploads:
+    *   *Overall bar* — Shows collective part completion (e.g., "Part 3/7 uploaded, 42%")
+    *   *Per-part bar* — Shows live upload progress of the current partition with speed and bytes
+*   **Instant Cancel**: Cancel any upload or download instantly via task abort — no waiting for the current part to finish.
+*   **Upload/Download Queue**: Visual queue with minimize, individual cancel buttons, and live progress with speed.
+*   **Temp File Cleanup**: Temporary partition files are automatically cleaned up on success, cancel, or error — with Windows file-lock retries.
 *   **High Performance Grid**: Virtual scrolling handles folders with thousands of files instantly.
 *   **Auto-Updates**: Seamless updates for Windows, macOS, and Linux.
 *   **Media Streaming**: Stream video and audio files directly without downloading.
@@ -63,6 +73,11 @@ Telegram Drive leverages the Telegram API to allow you to upload, organize, and 
     *   **macOS/Linux:** `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
     *   **Windows:** Download and run `rustup-init.exe` from [rustup.rs](https://rustup.rs/)
     *   *Verify installation:* run `rustc --version` and `cargo --version` in your terminal.
+*   **FFmpeg** (required for large video splitting): Needed to split video files >2GB into playable segments.
+    *   **Windows:** `winget install Gyan.FFmpeg`
+    *   **macOS:** `brew install ffmpeg`
+    *   **Linux:** `sudo apt install ffmpeg` (Debian/Ubuntu) or `sudo dnf install ffmpeg` (Fedora)
+    *   *Verify installation:* run `ffmpeg -version` in your terminal.
 *   **OS-Specific Build Tools for Tauri**: 
     *   **macOS:** Xcode Command Line Tools (`xcode-select --install`).
     *   **Linux (Ubuntu/Debian):** `sudo apt update && sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`

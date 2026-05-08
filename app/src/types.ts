@@ -18,12 +18,27 @@ export interface QueueItem {
     id: string;
     path: string;
     folderId: number | null;
-    status: 'pending' | 'uploading' | 'success' | 'error' | 'cancelled';
+    status: 'pending' | 'uploading' | 'splitting' | 'success' | 'error' | 'cancelled';
     error?: string;
-    progress?: number; // 0-100
+    /** Overall progress 0-100 across all parts */
+    progress?: number;
     uploaded_bytes?: number;
     total_bytes?: number;
     speed_bytes_per_sec?: number;
+    /** For split uploads: which part (1-based) */
+    partIndex?: number;
+    /** For split uploads: total number of parts */
+    totalParts?: number;
+    /** Parent queue item ID that spawned this part */
+    parentTransferId?: string;
+    /** Current part's individual progress 0-100 */
+    partProgress?: number;
+    /** Current part's uploaded bytes */
+    partUploadedBytes?: number;
+    /** Current part's total bytes */
+    partTotalBytes?: number;
+    /** Current part's speed */
+    partSpeedBytesPerSec?: number;
 }
 
 export interface BandwidthStats {
@@ -42,4 +57,12 @@ export interface DownloadItem {
     downloaded_bytes?: number;
     total_bytes?: number;
     speed_bytes_per_sec?: number;
+}
+
+export interface SplitItem {
+    id: string;
+    filename: string;
+    status: 'splitting' | 'zipping' | 'partitioning' | 'success' | 'error';
+    progress?: number; // 0-100
+    message?: string;
 }

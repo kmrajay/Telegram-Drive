@@ -25,6 +25,14 @@ pub struct TelegramState {
     /// Populated lazily on first resolve_peer call, eagerly during cmd_scan_folders.
     /// Cleared on logout.
     pub peer_cache: Arc<tokio::sync::RwLock<HashMap<i64, Peer>>>,
+    /// Set of transfer IDs that have been cancelled by the user.
+    /// Checked during upload/download loops to abort early.
+    pub cancelled_transfers: Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>,
+    /// Active upload/download task handles — used to abort a running transfer immediately.
+    pub active_handles: Arc<tokio::sync::RwLock<HashMap<String, tokio::task::AbortHandle>>>,
+    /// Temp directories created by split uploads, keyed by transfer ID.
+    /// Used to clean up temp files on cancel or after upload completes.
+    pub temp_dirs: Arc<tokio::sync::RwLock<HashMap<String, std::path::PathBuf>>>,
 }
 
 pub mod auth;
@@ -40,3 +48,6 @@ pub use preview::*;
 pub use utils::*;
 pub use network::*;
 pub use streaming::*;
+
+// Re-export the cancel command so lib.rs can find it
+pub use fs::cmd_cancel_transfer;

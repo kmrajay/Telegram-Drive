@@ -13,6 +13,7 @@ import { TopBar } from './dashboard/TopBar';
 import { FileExplorer } from './dashboard/FileExplorer';
 import { UploadQueue } from './dashboard/UploadQueue';
 import { DownloadQueue } from './dashboard/DownloadQueue';
+import { SplitQueue } from './dashboard/SplitQueue';
 import { MoveToFolderModal } from './dashboard/MoveToFolderModal';
 import { PreviewModal } from './dashboard/PreviewModal';
 import { MediaPlayer } from './dashboard/MediaPlayer';
@@ -99,8 +100,8 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
 
     } = useFileOperations(activeFolderId, selectedIds, setSelectedIds, displayedFiles);
 
-    const { uploadQueue, setUploadQueue, handleManualUpload, cancelAll: cancelUploads, isDragging } = useFileUpload(activeFolderId, store);
-    const { downloadQueue, queueDownload, clearFinished: clearDownloads, cancelAll: cancelDownloads } = useFileDownload(store);
+    const { uploadQueue, setUploadQueue, splitQueue, handleManualUpload, cancelItem: cancelUploadItem, cancelAll: cancelUploads, clearFinished: clearUploads, removeSplitItem, isDragging } = useFileUpload(activeFolderId, store);
+    const { downloadQueue, queueDownload, clearFinished: clearDownloads, cancelItem: cancelDownloadItem, cancelAll: cancelDownloads } = useFileDownload(store);
 
 
     const handleSelectAll = useCallback(() => {
@@ -460,16 +461,31 @@ export function Dashboard({ onLogout }: { onLogout: () => void }) {
             )}
 
 
-            <UploadQueue
-                items={uploadQueue}
-                onClearFinished={() => setUploadQueue(q => q.filter(i => i.status !== 'success' && i.status !== 'error' && i.status !== 'cancelled'))}
-                onCancelAll={cancelUploads}
-            />
-            <DownloadQueue
-                items={downloadQueue}
-                onClearFinished={clearDownloads}
-                onCancelAll={cancelDownloads}
-            />
+            {/* Transfer queues - stacked vertically */}
+            <div className="fixed bottom-4 right-4 flex flex-col-reverse gap-2 z-[100] pointer-events-none">
+                <div className="pointer-events-auto">
+                    <UploadQueue
+                        items={uploadQueue}
+                        onClearFinished={clearUploads}
+                        onCancelAll={cancelUploads}
+                        onCancelItem={cancelUploadItem}
+                    />
+                </div>
+                <div className="pointer-events-auto">
+                    <DownloadQueue
+                        items={downloadQueue}
+                        onClearFinished={clearDownloads}
+                        onCancelAll={cancelDownloads}
+                        onCancelItem={cancelDownloadItem}
+                    />
+                </div>
+                <div className="pointer-events-auto">
+                    <SplitQueue
+                        items={splitQueue}
+                        onRemove={removeSplitItem}
+                    />
+                </div>
+            </div>
         </div>
     );
 }
